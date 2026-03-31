@@ -24,7 +24,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'OpenMM==8.2.0',
-        'numpy==1.24',
+        'numpy',
         'pandas==2.1.1',
         'MDAnalysis==2.6.1',
         'biopython==1.81',
