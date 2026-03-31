@@ -15,7 +15,7 @@ from Bio.SeqRecord import SeqRecord
 
 import os
 
-from localcider.sequenceParameters import SequenceParameters
+# from localcider.sequenceParameters import SequenceParameters
 import tqdm as tqdm
 import warnings
 
@@ -245,11 +245,11 @@ def calc_mw(fasta,residues=[]):
         mw = SeqUtils.molecular_weight(seq,seq_type='protein')
     return mw
 
-def calc_kappa(seq):
-    seq = "".join(seq)
-    SeqOb = SequenceParameters(seq)
-    k = SeqOb.get_kappa()
-    return k
+# def calc_kappa(seq):
+#     seq = "".join(seq)
+#     SeqOb = SequenceParameters(seq)
+#     k = SeqOb.get_kappa()
+#     return k
 
 ### SEQUENCE MANIPULATION
 def shuffle_str(seq):
