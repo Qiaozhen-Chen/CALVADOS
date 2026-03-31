@@ -31,7 +31,7 @@ setup(
         'Jinja2==3.1.2',
         'tqdm==4.66',
         'matplotlib==3.8',
-        'PyYAML==6.0',
+        'PyYAML',
         'statsmodels==0.14',
         'localcider==0.1.21',
         'pytest==8.3.3',
