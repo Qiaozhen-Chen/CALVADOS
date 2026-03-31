@@ -23,7 +23,7 @@ setup(
     license='GNU GPL3',
     packages=find_packages(),
     install_requires=[
-        # 'OpenMM==8.2.0',
+        'OpenMM==8.2.0',
         # 'numpy',
         # 'pandas==2.1.1',
         'MDAnalysis',#==2.6.1',
