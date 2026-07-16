@@ -53,6 +53,7 @@ from calvados.analysis import save_conf_prop
 
 save_conf_prop(path="{path:s}",name="{sysname:s}",residues_file="{residues_file:s}",output_path="data",start=10,is_idr=True,select='all')
 """
+#is_idr=False：体系不是固有无序蛋白专属分析模式
 
 config.write(path,name='config.yaml',analyses=analyses)
 
@@ -60,7 +61,7 @@ components = Components(
   # Defaults
   molecule_type = 'protein',
   nmol = 1, # number of molecules
-  restraint = False, # apply restraints
+  restraint = False, # apply restraints，不开启自定义谐波约束（=true，即结构域之间固定距离约束，用于维持蛋白三维折叠）
   charge_termini = 'both', # charge N or C or both
 
   # INPUT
