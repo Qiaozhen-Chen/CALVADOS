@@ -86,7 +86,7 @@ def test_bonds(name,molecule_type):
     restraint = False,
     charge_termini = 'none',
     )
-    components.add(name=name, molecule_type=molecule_type)
+    components.add(name=name, molecule_type=molecule_type) #name本身就是一个RNA碱基序列，是rrrrrr。
 
     components.write(path,name='components.yaml')
 
