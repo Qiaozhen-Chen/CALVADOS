@@ -68,7 +68,8 @@ config = Config(
 save_conf_prop(path="{path:s}",name="{sysname:s}",residues_file="{residues_file:s}",output_path=f"{cwd}/data",start=100,is_idr=False,select='all')
 """
 #start=100：跳过前 100 帧 equilibration 平衡阶段，从第 100 帧开始统计
-#体系不是固有无序蛋白专属分析模式
+#is_idr=False：体系不是固有无序蛋白专属分析模式
+#ps：is_idr=True（包含 IDR 区域时改成这个）会额外启用一套针对固有无序序列的分析逻辑：读取 domain.yaml 里标记的 IDR 无序区段；分开统计：折叠结构域 / IDR 无序区 两套 Rg、柔性、伸展程度；计算 IDR 特有的：持久长度、链扩张因子、跨 IDR 分子接触、带电残基在无序区的分布；输出额外独立 csv：*_idr_props.csv 无序区专属结果表。
 #select='all'：体系内所有蛋白全部统计分析
 
 config.write(path,name='config.yaml',analyses=analyses)
