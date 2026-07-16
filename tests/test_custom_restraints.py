@@ -102,6 +102,7 @@ def test_cres(name):
     force = system.getForces()[3] #OpenMM System 中存储多种力场（LJ、静电、键角、约束等），索引 3 对应自定义谐波约束力，取出该力对象，查看里面定义的弹簧键。
     N = force.getNumBonds()  #.getNumBonds()获取当前自定义约束力中定义的约束键总数量，存入 N。
 
+##？？？接下来不是很明白了
     f = force.getBondParameters(0) #读取第 0 号约束键的全部参数，返回元组格式(原子i索引,原子j索引,平衡距离,弹簧力常数)。
     i, j = f[0], f[1]
 
@@ -111,3 +112,5 @@ def test_cres(name):
     #     f = force.getBondParameters(idx)
     #     i, j = f[0], f[1]
     #     assert bond_check(i,j)
+
+#这是在检查所有bond是否满足phosphate-base或者phosphate-phosphate的连接规则。后来为了测试 custom restraints，改成了更严格的检查：必须只有一个由 cres.txt 指定的键，且连接粒子 0 和 9，因此这段循环被注释掉了。
