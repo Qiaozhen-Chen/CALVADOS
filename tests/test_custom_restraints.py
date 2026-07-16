@@ -18,6 +18,7 @@ def bond_check(i: int, j: int):
     condition2 = (j == i+1) # phosphate -- base
 
     condition = condition0 and (condition1 or condition2)
+#因为这里每个核苷酸有两个beads：0 phosphate；1 base；2 phosphate；3 base；4 phosphate；5 base……所以偶数都是 phosphate，只有偶数phosphate并且连接下一颗base或者连接下一个phosphate才返回True。
     return condition
 
 @pytest.mark.parametrize(
@@ -98,10 +99,10 @@ def test_cres(name):
 
     system = openmm.XmlSerializer.deserialize(open(f"{cwd}/tests/data/{sysname}/{sysname}.xml").read())
 
-    force = system.getForces()[3]
-    N = force.getNumBonds()
+    force = system.getForces()[3] #OpenMM System 中存储多种力场（LJ、静电、键角、约束等），索引 3 对应自定义谐波约束力，取出该力对象，查看里面定义的弹簧键。
+    N = force.getNumBonds()  #.getNumBonds()获取当前自定义约束力中定义的约束键总数量，存入 N。
 
-    f = force.getBondParameters(0)
+    f = force.getBondParameters(0) #读取第 0 号约束键的全部参数，返回元组格式(原子i索引,原子j索引,平衡距离,弹簧力常数)。
     i, j = f[0], f[1]
 
     assert (N == 1) and (i == 0) and (j == 9)
