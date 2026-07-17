@@ -1,3 +1,4 @@
+#RNA会完整用到这里的所有力场 / 相互作用，还额外增加 RNA 专属的角度弯曲势（sim.py line390~)
 import numpy as np
 from openmm import openmm, unit
 
