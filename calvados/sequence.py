@@ -1,3 +1,5 @@
+#20260717，暂时不对这份代码进行详细注释，这份代码是CALVADOS 粗粒化蛋白模拟专用序列特征计算工具库，核心功能：从 PDB/FASTA 读取蛋白序列、计算带电性质、电荷装饰 SCD、疏水装饰 SHD、电荷不对称参数 κappa、序列偶极、芳香族占比、有效相互作用能（AH 疏水势、Yukawa 静电势）、蒙特卡洛序列重排、SVR 预测凝聚相参数 ν 等，大量使用 Numba 加速循环，适配 MDAnalysis 轨迹 / 结构文件、Biopython 序列 IO、localcider 电荷不对称计算。
+
 import numpy as np
 
 from MDAnalysis import Universe
