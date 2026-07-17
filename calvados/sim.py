@@ -10,14 +10,19 @@ from tqdm import tqdm
 import os
 
 from calvados import build, interactions
+#导入 CALVADOS 自定义模块：build：盒子构建、分子网格排布、双层膜坐标生成、随机放置分子；interactions：所有粗粒化力场、 restraints、DH 静电、脂质专属作用、自定义约束工厂函数
 
 from yaml import safe_load
+#安全读取 yaml 配置文件，解析 config.yaml/components.yaml 字典参数。
 
 from Bio.SeqUtils import seq3
+#Biopython 工具：氨基酸单字母序列转三字母残基名（A→ALA、K→LYS），用于 PDB 拓扑残基命名。
 
 from .components import *
 
+#定义模拟主类 Sim，封装读配置 → 构建分子组分 → 搭建 OpenMM 体系 → 放置粒子 → 添加全部力场 → 运行模拟完整流程。
 class Sim:
+#init 构造函数（初始化参数）：path：模拟输出文件夹路径；config：config.yaml 解析后的全局参数字典；components：components.yaml 解析后的分子组分定义字典
     def __init__(self,path,config,components):
         """
         simulate openMM Calvados;
