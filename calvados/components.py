@@ -1,12 +1,17 @@
 from .sequence import seq_from_pdb, read_fasta, get_qs, patch_terminal_qs, patch_terminal_mws
+#相对导入当前包下 sequence.py 工具函数：seq_from_pdb：从 PDB 提取残基序列、N/C 端位置；read_fasta：读取 FASTA 序列文件；get_qs：根据 pH、残基参数表计算每个珠子电荷；patch_terminal_qs：修正多肽 N/C 末端电荷；patch_terminal_mws：修正多肽末端分子量。
 from .analysis import self_distances
+#导入 analysis.py 距离分析函数：计算构象内所有残基两两距离矩阵（dmap），支持周期性盒子。
 from calvados import build, interactions
-
+#CALVADOS 顶层工具包：build：构象构建工具（螺旋 / 紧凑 / 线性 / PDB 坐标读取、二级结构域、B 因子 / PAE 缩放等）；interactions：OpenMM 相互作用工厂（键合力、约束势、缩放 LJ、YU 静电作用初始化）。
 from pandas import read_csv
+#pandas 读取残基参数 csv 文件（每个残基的 sigma、lambda、键长、分子量、电荷参数）。
 
 from openmm import unit
+#OpenMM 单位系统：nm、kJ/mol、rad、无量纲，所有力场参数必须绑定单位。
 
 import numpy as np
+#数值计算：距离矩阵、sigmoid 缩放、序列参数数组、坐标数组。
 
 class Component:
     """ Generic component of the system. """
@@ -16,50 +21,56 @@ class Component:
 
         # read component properties
         for key, val in properties.items():
-            setattr(self, key, val)
+            setattr(self, key, val)         #遍历自定义参数字典，动态给实例创建属性（如 self.fresidues、self.pdb_folder、self.restraint 等）。
 
         # read default properties where necessary
         for key, val in defaults.items():
             if key not in properties:
-                setattr(self, key, val)
+                setattr(self, key, val)      #如果自定义参数缺失，填充全局默认参数，避免属性缺失报错。
 
         # read residue parameters from file
         try:
             self.residues = read_csv(self.fresidues).set_index('one')
         except AttributeError:
             raise FileNotFoundError(f'Residue parameter file name (fresidues) not supplied to component {name}.')
-
+                                     #读取残基参数 CSV，以单字母残基名one作为索引；捕获AttributeError（没有fresidues属性），抛出明确报错：未指定残基参数文件。self.residues.loc['A'] 即可快速获取丙氨酸全部力场参数。
+ 
+    #calc_comp_seq ()：读取序列、标记 N/C 端  
     def calc_comp_seq(self):
         """ Calculate sequence of component. """
 
         if self.restraint:
-            self.seq, self.n_termini, self.c_termini = seq_from_pdb(f'{self.pdb_folder}/{self.name}.pdb')
+            self.seq, self.n_termini, self.c_termini = seq_from_pdb(f'{self.pdb_folder}/{self.name}.pdb')    #若开启约束 restraint=True（使用真实 PDB 构象）：从 PDB 提取序列、N 端残基索引列表、C 端残基索引列表；
         else:
             records = read_fasta(self.ffasta)
             self.seq = str(records[self.name].seq)
             self.n_termini = [0]
-            self.c_termini = [len(self.seq)-1]
-
+            self.c_termini = [len(self.seq)-1]                  #无约束（自组装构象：螺旋 / 线性 / 紧凑）：读取 FASTA 序列；默认单 N 端 0 号、单 C 端最后一个残基；存储。
+#批量计算所有珠子力场参数
     def calc_properties(self, pH: float = 7.0, verbose: bool = False):
         """ Calculate component properties (sigmas, lambdas, qs etc.) """
 
-        self.calc_comp_seq()
-        self.nres = len(self.seq)
-        self.nbeads = self.nres
-        self.sigmas = np.array([self.residues.loc[s].sigmas for s in self.seq])
-        self.lambdas = np.array([self.residues.loc[s].lambdas for s in self.seq])
-        self.bondlengths = np.array([self.residues.loc[s].bondlength for s in self.seq])
-        self.mws = np.array([self.residues.loc[s].MW for s in self.seq])
-        self.qs, _ = get_qs(self.seq,flexhis=True,pH=pH,residues=self.residues)
-        self.alphas = self.lambdas*self.alpha
-        self.init_bond_force()
-
+        self.calc_comp_seq()         #先加载序列；
+        self.nres = len(self.seq)    #nres：残基总数；
+        self.nbeads = self.nres      #默认单珠模型：1 残基 = 1 珠子，nbeads = nres（RNA 子类会重写该逻辑为双珠）。
+        self.sigmas = np.array([self.residues.loc[s].sigmas for s in self.seq])    #sigmas：LJ 作用半径；
+        self.lambdas = np.array([self.residues.loc[s].lambdas for s in self.seq])  #lambdas：疏水相互作用强度；
+        self.bondlengths = np.array([self.residues.loc[s].bondlength for s in self.seq])   #bondlengths：平衡键长；
+        self.mws = np.array([self.residues.loc[s].MW for s in self.seq])            #mws：残基分子量。
+        self.qs, _ = get_qs(self.seq,flexhis=True,pH=pH,residues=self.residues)     #根据 pH 计算每个残基电荷；flexhis=True 组氨酸可质子化切换。
+        self.alphas = self.lambdas*self.alpha           #全局疏水缩放系数 × 残基 lambda，得到最终疏水强度。
+        self.init_bond_force()        #初始化键合力容器（父类仅创建空列表和 OpenMM 键对象，子类扩展约束 / 角度力）。
+#calc_dmap ()：计算全原子距离矩阵
+# -periodic=True：周期性盒子，传入盒子尺寸dimensions计算最小镜像距离；
+# -否则直接欧氏距离；
+# -self.dmap[i,j] = 珠子 i-j 平衡距离（用于 Go/Harmonic 约束）。
     def calc_dmap(self):
         if self.periodic:
             self.dmap = self_distances(self.xinit,self.dimensions)
         else:
             self.dmap = self_distances(self.xinit)
 
+#calc_x_setup ()：无约束时生成初始坐标，对应sim.py文件
     def calc_x_setup(self, d: float = 0.38, comp_setup: str = 'spiral',
             n_per_res: int = 1, ys = None):
         if comp_setup == 'spiral':
@@ -69,32 +80,40 @@ class Component:
         else:
             self.xinit = build.build_linear(self.bondlengths, n_per_res=n_per_res, ys=ys)
 
+#bond_check 静态方法（占位，子类重写）
+#静态方法，判断 i,j 两个珠子是否成共价键；父类仅占位，蛋白 / RNA / 脂质各自重写拓扑规则。
     @staticmethod
     def bond_check(i: int, j: int):
         """ Placeholder for molecule-specific method. """
         return False
 
+#calc_bondlength ()：计算 i-j 平衡键长
+#默认取两个珠子键长平均值作为平衡键长；蛋白 / RNA 子类重写，支持 PDB 原生距离、混合缩放 Go 键长。
     def calc_bondlength(self, i: int, j: int):
         d0 = 0.5 * (self.bondlengths[i] + self.bondlengths[j])
         return d0
 
+#init_bond_force ()：初始化键存储容器
     def init_bond_force(self):
         self.bond_pairlist = []
         self.hb = interactions.init_bonded_interactions()
 
-    def add_bonds(self, offset):
+#add_bonds (offset)：批量添加共价键到 OpenMM
+    def add_bonds(self, offset):  #参数offset：多分子共存时，当前分子珠子全局 ID 偏移（区分不同 Component）。
         exclusion_map = [] # for ah, yu etc.
         for i in range(0,self.nbeads-1):
-            for j in range(i, self.nbeads):
-                if self.bond_check(i,j):
-                    d = self.calc_bondlength(i, j)
+            for j in range(i, self.nbeads):         #双重循环遍历所有珠子对 i<j；
+                if self.bond_check(i,j):            #bond_check 判断是否为共价键；
+                    d = self.calc_bondlength(i, j)  #计算平衡键长 d；
                     bidx = self.hb.addBond(
                         i+offset, j+offset, d*unit.nanometer,
-                        self.kb*unit.kilojoules_per_mole/(unit.nanometer**2))
-                    self.bond_pairlist.append([i+offset+1,j+offset+1,bidx,d,self.kb]) # 1-based
-                    exclusion_map.append([i+offset,j+offset])
-        return exclusion_map
+                        self.kb*unit.kilojoules_per_mole/(unit.nanometer**2))   #向 OpenMM 键力添加键，传入全局 ID、平衡距离、键劲度 kb；
+                    self.bond_pairlist.append([i+offset+1,j+offset+1,bidx,d,self.kb]) # 1-based，即存入 bond_pairlist（输出文件用 1-based 索引）；
+                    exclusion_map.append([i+offset,j+offset])   #exclusion_map 返回成键对，用于非键相互作用排除 1-2 共价邻居。
 
+        return exclusion_map
+        
+# get_forces ()：收集该分子所有 OpenMM 力
     def get_forces(self):
         self.forces = [self.hb]
 
@@ -106,24 +125,32 @@ class Component:
             for b in self.bond_pairlist:
                 f.write(f'{int(b[0])}\t{int(b[1])}\t{int(b[2])}\t{b[3]:.4f}\t{b[4]:.4f}\n')
 
+#Protein (Component) 蛋白子类：单珠多肽，支持 Harmonic/Go 约束
 class Protein(Component):
     """ Component protein. """
 
     def __init__(self, name: str, comp_dict: dict, defaults: dict):
         super().__init__(name, comp_dict, defaults)
 
+# calc_x_from_pdb ()：从 PDB 读取原生坐标
     def calc_x_from_pdb(self):
         """ Calculate protein positions from pdb. """
 
+#调用 build 工具读取 PDB：xinit：PDB 珠子坐标；dimensions：PDB 盒子尺寸；use_com：是否将分子质心平移至盒子中心。
         input_pdb = f'{self.pdb_folder}/{self.name}.pdb'
         self.xinit, self.dimensions = build.geometry_from_pdb(input_pdb,use_com=self.use_com) # read from pdb
 
+#calc_ssdomains ()：读取二级结构域（Harmonic 约束用），读取二级结构域文件（fdomains），存储结构化残基区间，仅区间内残基施加距离约束。
     def calc_ssdomains(self):
         """ Get bounds for restraints (harmonic). """
 
         self.ssdomains = build.get_ssdomains(self.name,self.fdomains)
         # print(f'Setting {self.restraint_type} restraints for {comp.name}')
 
+#calc_go_scale ()：Go 模型缩放因子（AlphaFold B 因子 + PAE）
+#1.提取 PDB B 因子（置信度）；
+#2.外积得到 i,j 残基最小 B 因子矩阵；
+#3.sigmoid 函数归一化 B 因子贡献：B 越高，约束强度越高。
     def calc_go_scale(self, bscale_shift = 0.1, bscale_width = 80):#,
             # pdb_folder: str, bfac_width: float = 50., bfac_shift: float = 0.8,
             # pae_width: float = 8., pae_shift: float = 0.4, colabfold: int = 0):
@@ -135,12 +162,17 @@ class Protein(Component):
         bfac_sigm_factor = self.bfac_width*(self.bfac_map-self.bfac_shift)
         bfac_sigm = np.exp(bfac_sigm_factor) / (np.exp(bfac_sigm_factor) + 1)
 
+#读取 AlphaFold PAE 误差矩阵，对称化，单位转 nm；
+#PAE 越小（预测距离越准），sigmoid 值越高，约束越强。
         input_pae = f'{self.pdb_folder}/{self.name}.json'
         self.pae = build.load_pae(input_pae,symmetrize=True,colabfold=self.colabfold) / 10. # in nm
         pae_sigm_factor = -self.pae_width*(self.pae-self.pae_shift)
         pae_sigm = np.exp(pae_sigm_factor) / (np.exp(pae_sigm_factor) + 1)
         # pae_inv = build.load_pae_inv(input_pae,colabfold=self.colabfold)
         # scaled_LJYU_pairlist = []
+#scale：总约束强度（0~1）；
+#bondscale：混合系数，用于插值原生 PDB 距离与标准键长；
+#scale 高→使用 PDB 真实距离；scale 低→使用标准平衡键长。
         self.scale = bfac_sigm * pae_sigm # restraint scale
         # self.bondscale = np.minimum(1.,np.maximum(0, 1. - 10.* (self.scale - min_scale))) # residual interactions for low restraints
         self.bondscale = np.exp(-bscale_width*(self.scale-bscale_shift)) / (np.exp(-bscale_width*(self.scale-bscale_shift)) + 1)
@@ -165,6 +197,7 @@ class Protein(Component):
     #                 self.bondscale[idx,jdx] = 1.
     #                 self.bondscale[jdx,idx] = 1.
 
+#重载 calc_properties ()：蛋白末端修正 + 约束分支
     def calc_properties(self, pH: float = 7.0, verbose: bool = False, comp_setup: str = 'spiral'):
         """ Protein properties. """
 
@@ -175,25 +208,26 @@ class Protein(Component):
             print(f'Adding charges for {self.charge_termini} termini of {self.name}.', flush=True)
         self.qs = patch_terminal_qs(self.qs,self.n_termini,self.c_termini,loc=self.charge_termini)
         self.mws = patch_terminal_mws(self.mws,self.n_termini,self.c_termini,loc=self.charge_termini)
-
+#执行父类参数计算；修正 N/C 末端电荷、分子量（多肽末端有额外氨基 / 羧基电荷）。
+        
         if self.restraint:
             # self.init_restraint_force() # Done via sim.py
             self.calc_x_from_pdb()
             self.calc_dmap()
-            if self.restraint_type == 'harmonic':
+            if self.restraint_type == 'harmonic':   #Harmonic：读取二级结构域；
                 self.calc_ssdomains()
-            elif self.restraint_type == 'go':
+            elif self.restraint_type == 'go':     #Go：计算 B 因子 + PAE 缩放矩阵；
                 self.calc_go_scale()
         else:
-            self.calc_x_setup(comp_setup = comp_setup)
+            self.calc_x_setup(comp_setup = comp_setup) #无约束：生成螺旋 / 线性初始坐标。
 
     def calc_bondlength(self, i, j, min_scale = 0.05, cutoff_mix_in_LJYU = 0.15):
         d0 = 0.5 * (self.bondlengths[i] + self.bondlengths[j])
         if self.restraint:
-            if self.restraint_type == 'harmonic':
+            if self.restraint_type == 'harmonic':       #Harmonic：i,j 都在二级结构域内→用 PDB 原生距离，否则标准键长；
                 ss = build.check_ssdomain(self.ssdomains,i,j,req_both=False)
                 d = self.dmap[i,j] if ss else d0
-            elif self.restraint_type == 'go':
+            elif self.restraint_type == 'go':           #Go 模型三分支：scale 极低：完全标准键长；scale 极高：完全 PDB 原生距离；中间区间：线性插值混合两种距离。
                 if self.scale[i,j] < min_scale:
                 # if self.bondscale[i,j] > max_bscale:
                     d = d0
@@ -208,11 +242,12 @@ class Protein(Component):
             d = d0
         return d
 
+#bond_check：蛋白共价键拓扑（相邻残基 i,i+1，排除跨末端）
     def bond_check(self, i: int, j: int):
         """ Define bonded term conditions. """
 
         condition = (j == i+1)
-        condition_termini = (i not in self.c_termini) and (j not in self.n_termini)
+        condition_termini = (i not in self.c_termini) and (j not in self.n_termini)   #仅 i 与 i+1 成肽键；排除 C 端与下一条链 N 端（避免跨链错误成键）。
         return condition and condition_termini
 
     def add_bonds(self, offset):
@@ -228,6 +263,7 @@ class Protein(Component):
                     exclusion_map.append([i+offset,j+offset])
         return exclusion_map
 
+# init_restraint_force：初始化约束力、缩放 LJ/YU 静电
     def init_restraint_force(self, eps_lj=None, cutoff_lj=None, eps_yu=None, k_yu=None):
         self.cs = interactions.init_restraints(self.restraint_type)
         self.restr_pairlist = []
@@ -237,6 +273,7 @@ class Protein(Component):
             self.scLJ = interactions.init_scaled_LJ(eps_lj,cutoff_lj)
             self.scYU = interactions.init_scaled_YU(eps_yu,k_yu)
 
+#add_restraints：批量添加残基间接触约束
     def add_restraints(self, offset, min_scale = 0.05, cutoff_mix_in_LJYU = 0.15):
         """ Add restraints. """
         exclusion_map = [] # for ah, yu etc.
@@ -297,6 +334,7 @@ class Protein(Component):
             if self.restraint_type == 'go':
                 self.forces.extend([self.scLJ, self.scYU])
 
+###!!!RNA (Component) RNA 双珠模型（磷酸 p + 碱基 s/r）
 class RNA(Component):
     """ Component RNA. """
 
