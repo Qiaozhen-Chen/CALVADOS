@@ -58,11 +58,9 @@ class Sim:
 
     def make_components(self):
         self.components = np.empty(0) #初始化空 numpy 数组，用来存放所有分子组分实例（Protein/Lipid/RNA...）。
-        self.use_restraints = False   
-###标记体系是否包含 GO 拓扑约束（蛋白折叠约束），默认 False。
-###ps: GO 拓扑折叠约束确实是在 prepare.py 里配置开关，不是在 Sim 模拟主代码里硬写死，prepare.py 控制「是否开启约束、约束类型是 harmonic /go、力常数、PAE 参数」，最终写入 components.yaml；
-###ps: Sim 类代码只是读取 yaml 并实例化约束力，不负责开关控制。
-       
+        self.use_restraints = False   #标记体系是否包含拓扑约束（蛋白折叠约束），默认 False。
+
+        #定义molecular type       
         # comp_setup = 'spiral' if self.topol=='shift_ref_bead' else 'linear'
         for name, properties in self.comp_dict.items(): #循环遍历 components.yaml system 下每一种分子（如 proteinA、POPC、mRNA1）。
             molecule_type = properties.get('molecule_type', self.default_molecule_type) #读取当前分子类型，若无则使用全局默认分子类型。
@@ -150,7 +148,7 @@ class Sim:
             non_protein_components = self.components[np.where(molecule_types!='protein')]
             self.components = np.append(protein_components,non_protein_components)
 
-    def build_system(self):    #整个模拟体系构建入口，四大任务：初始化拓扑 / 盒子、生成所有分子、初始化全部粗粒化力、放置粒子并添加键 / 角 / 约束。
+    def build_system(self):    #整个模拟体系构建入口，四大任务：初始化拓扑/盒子、生成所有分子、初始化全部粗粒化力、放置粒子并添加键/角/约束。
         """
         Set up system
         * component definitions
@@ -168,11 +166,11 @@ class Sim:
         # init interaction parameters (required before make components)
         self.eps_yu, self.k_yu = interactions.genParamsDH(self.temp,self.ionic)  #生成 Debye-Hückel 静电（Yu 势）参数：屏蔽强度、势阱深度，依赖温度与离子强度。
 
-        # make components, 先生成所有分子对象，再统计数量、重排顺序。
+        # make components
         self.make_components()
         self.count_components()
 
-        # init interactions, 初始化两大非键作用：ah Ashbaugh-Hatch LJ 混合势（粗粒化范德华）; yu Debye-Hückel 静电势
+        # init interactions #初始化两大非键作用：ah Ashbaugh-Hatch LJ 混合势（粗粒化范德华）; yu Debye-Hückel 静电势
         self.ah, self.yu = interactions.init_nonbonded_interactions(
             self.eps_lj,self.cutoff_lj,self.eps_yu,self.k_yu,self.cutoff_yu,self.fixed_lambda
             )
@@ -183,7 +181,6 @@ class Sim:
         if self.ncookelipids > 0:
             if self.nlipids > 0:
                 raise     #Cooke 脂质与标准脂质不能共存；作用缩放系数改为 3.0 适配 Cooke 粗粒模型。
-###像蛋白质，rna等上面定义的其他类型的分子，关于缩放系数具体的值，在prepare.py文件里设置。如果体系有蛋白设置到idr区域，可以对蛋白进行局部约束和分区域设置缩放系数。
             
             self.cos, self.cn = interactions.init_lipid_interactions(
             self.eps_lj,self.eps_yu,self.cutoff_yu,factor=3.0
@@ -226,12 +223,10 @@ class Sim:
                 if self.verbose:
                     print(f'Component {cidx}, Molecule {idx}: {comp.name}')
                 # particle definitions
-                #两步基础构建：1. add_mdtraj_topol：把该分子的残基、珠子、键写入 MDTraj 拓扑；2. add_particles_system：把每个珠子质量加入 OpenMM System
                 self.add_mdtraj_topol(comp)
                 self.add_particles_system(comp.mws)
 
                 # add interactions + restraints
-                #区分放置函数：蛋白 / RNA / 拥挤物：place_molecule 网格 / 随机放置；脂质：place_bilayer 嵌入双层膜平面
                 if comp.molecule_type in ['protein','crowder','cyclic','seastar','ptm_protein']:
                     xs = self.place_molecule(comp)
                 elif comp.molecule_type in ['lipid','cooke_lipid']:
@@ -243,7 +238,6 @@ class Sim:
                 self.add_interactions(comp)
 
                 # add restraints towards box center
-                #开启薄层平衡 / 自定义外力，且分子允许外部约束时，给该分子所有珠子添加中心限制外力。
                 if (self.slab_eq or self.ext_force) and comp.ext_restraint:
                     self.add_ext_restraints(comp)
 
@@ -262,17 +256,17 @@ class Sim:
 
 #add_forces_to_system () 将所有力注册进 OpenMM 体系
     def add_forces_to_system(self):
-        """ Add forces to system. """   #先加分子间非键：静电 yu、LJ 混合 ah。
+        """ Add forces to system. """  
 
-        # Intermolecular forces
+        # Intermolecular forces      #先加分子间非键：静电 yu、LJ 混合 ah。
         for force in [self.yu, self.ah]:
-            self.system.addForce(force)  #膜体系额外添加脂质聚集、电荷 - 脂质作用。
+            self.system.addForce(force)  
 
-        if (self.nlipids > 0) or (self.ncookelipids > 0):
+        if (self.nlipids > 0) or (self.ncookelipids > 0): #膜体系额外添加脂质聚集、电荷 - 脂质作用。
             for force in [self.cos, self.cn]:
                 self.system.addForce(force)
 
-        # Intramolecular forces
+        # Intramolecular forces   #加分子内相互作用
         for comp in self.components:
             comp.get_forces() # bonded, angles, restraints...
             for force in comp.forces:
@@ -282,16 +276,16 @@ class Sim:
 
         # External force
         if self.ext_force:
-            self.system.addForce(self.rcent)    #自定义全局外部势场。
+            self.system.addForce(self.rcent)   
 
         # Equilibration forces
         if self.slab_eq:
-            self.system.addForce(self.rcent)    #薄层平衡 z 方向限制力。
+            self.system.addForce(self.rcent)   
 
         # Custom forces
         if self.custom_restraints:
             self.system.addForce(self.cres)
-            print(f'Number of custom restraints: {self.cres.getNumBonds()}')   #跨分子自定义距离约束。
+            print(f'Number of custom restraints: {self.cres.getNumBonds()}')  
 
         # Barostat force
         if self.box_eq:
@@ -299,7 +293,7 @@ class Sim:
                     [self.pressure[0]*unit.bar,self.pressure[1]*unit.bar,self.pressure[2]*unit.bar],
                     self.temp*unit.kelvin,self.boxscaling_xyz[0],self.boxscaling_xyz[1],
                     self.boxscaling_xyz[2],1000)
-            self.system.addForce(barostat)        #各向异性蒙特卡洛控压杆，三方向独立控压，用于本体溶液体系 NPT 平衡。
+            self.system.addForce(barostat)        
 
         # Bilayer eq. force
         if self.bilayer_eq:
@@ -307,7 +301,7 @@ class Sim:
                     0*unit.bar*unit.nanometer, self.temp*unit.kelvin,
                     openmm.openmm.MonteCarloMembraneBarostat.XYIsotropic,
                     openmm.openmm.MonteCarloMembraneBarostat.ZFixed, 10000)
-            self.system.addForce(barostat)        #膜专属控压杆：xy 平面各向同性、z 轴固定，维持膜零横向张力。
+            self.system.addForce(barostat)        
 
    #print_system_summary () 体系信息输出 + 序列化 System
     def print_system_summary(self, write_xml: bool = True):
@@ -384,7 +378,6 @@ class Sim:
 
         exclusion_map = comp.add_bonds(offset)
         self.add_exclusions(exclusion_map)
-    #offset = 当前分子第一个珠子在全局体系的索引偏移；添加分子内共价键，并返回需要关闭非键作用的粒子对，执行排除。
 
     def add_angles(self, comp, offset):
         """ Add bond forces. """
@@ -399,7 +392,6 @@ class Sim:
         exclusion_map = comp.add_restraints(offset)
         if exclude_nonbonded: # exclude ah, yu when restraining
             self.add_exclusions(exclusion_map)
-    #single molecule添加 GO 拓扑约束；约束成对粒子关闭 LJ / 静电非键作用避免双重势冲突。
 
     def add_custom_restraints(self, exclude_nonbonded = True):
         exclusion_map = []
@@ -417,11 +409,10 @@ class Sim:
         # exclude LJ, YU for restrained pairs
         for excl in exclusion_map:
             self.ah = interactions.add_exclusion(self.ah, excl[0], excl[1])    #ah：疏水 + 空间排斥（范德华类作用）
-            self.yu = interactions.add_exclusion(self.yu, excl[0], excl[1])    #yu：盐溶液中屏蔽静电库仑作用
+            self.yu = interactions.add_exclusion(self.yu, excl[0], excl[1])    #yu：静电库仑作用
             if self.nlipids > 0 or self.ncookelipids > 0:
                 self.cos.addExclusion(excl[0], excl[1])
                 self.cn.addExclusion(excl[0], excl[1])
-#对约束 / 成键粒子对，在所有非键力场中添加排除，不计算分子内非键相互作用。
 
 #add_interactions () 单分子完整力场挂载逻辑
     def add_interactions(self,comp):
@@ -439,13 +430,11 @@ class Sim:
                 self.ah.addParticle([sig*unit.nanometer, lam, -1])
             else: # protein, RNA
                 self.ah.addParticle([sig*unit.nanometer, lam, 1])
-            #给每个珠子注册 LJ 参数：半径 sig、混合 lambda、分子类型标记（区分蛋白 / 脂质 / 拥挤物交叉作用）。
             if self.nlipids > 0 or self.ncookelipids > 0:
                 if comp.molecule_type in ['lipid', 'cooke_lipid']:
                     self.cos.addParticle([sig*unit.nanometer, lam, 0])
                 else:
                     self.cos.addParticle([sig*unit.nanometer, lam, 1])
-            #膜体系额外注册脂质聚集势参数。
         
         # Add Debye-Huckel
         for q in comp.qs:
@@ -512,15 +501,9 @@ class Sim:
     def add_particles_system(self,mws):       #add_particles_system () 注册珠子质量到 OpenMM
         """ Add particles of one molecule to openMM system. """
 
-        for mw in mws:                        #mws 质量数组源头就是你这份 residues.csv 参数表的 MW 列
+        for mw in mws:                        #mws 质量数组源头就是residues.csv 参数表的 MW 列
             self.system.addParticle(mw*unit.amu)
 
-    #自定义约束映射 map_custom_restraints /parse_custom_restraints
-    #读取的自定义约束文件是.txt文件
-    #自定义约束文件和 domain / GO 约束的区别（这条文件独有优势）
-#GO 约束：自动根据 PAE 全序列批量生成天然接触，不能手动指定某几对；
-#domains.yaml：只能连续残基区间施加质心 / 区间弹簧，无法精确到单个残基点对点；
-#自定义 txt：完全手动自选任意两颗珠子（同分子 / 跨蛋白 / 蛋白 - RNA 都可以）定点加弹簧，自由度最高。
     def map_custom_restraints(self):  #读取自定义约束文件（分子名 - 拷贝号 - 珠子号），转换为全局绝对珠子索引，存入 custom_restr_abs。
         """ Map input format for custom restraints to absolute bead number """
         custom_restr = self.parse_custom_restraints(self.fcustom_restraints)
