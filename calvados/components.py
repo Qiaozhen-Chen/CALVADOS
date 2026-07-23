@@ -46,7 +46,8 @@ class Component:
             self.seq = str(records[self.name].seq)
             self.n_termini = [0]
             self.c_termini = [len(self.seq)-1]                  #无约束（自组装构象：螺旋 / 线性 / 紧凑）：读取 FASTA 序列；默认单 N 端 0 号、单 C 端最后一个残基；存储。
-#批量计算所有珠子力场参数
+    
+    #批量计算所有珠子力场参数
     def calc_properties(self, pH: float = 7.0, verbose: bool = False):
         """ Calculate component properties (sigmas, lambdas, qs etc.) """
 
@@ -60,17 +61,13 @@ class Component:
         self.qs, _ = get_qs(self.seq,flexhis=True,pH=pH,residues=self.residues)     #根据 pH 计算每个残基电荷；flexhis=True 组氨酸可质子化切换。
         self.alphas = self.lambdas*self.alpha           #全局疏水缩放系数 × 残基 lambda，得到最终疏水强度。
         self.init_bond_force()        #初始化键合力容器（父类仅创建空列表和 OpenMM 键对象，子类扩展约束 / 角度力）。
-#calc_dmap ()：计算全原子距离矩阵
-# -periodic=True：周期性盒子，传入盒子尺寸dimensions计算最小镜像距离；
-# -否则直接欧氏距离；
-# -self.dmap[i,j] = 珠子 i-j 平衡距离（用于 Go/Harmonic 约束）。
+
     def calc_dmap(self):
         if self.periodic:
             self.dmap = self_distances(self.xinit,self.dimensions)
         else:
             self.dmap = self_distances(self.xinit)
 
-#calc_x_setup ()：无约束时生成初始坐标，对应sim.py文件
     def calc_x_setup(self, d: float = 0.38, comp_setup: str = 'spiral',
             n_per_res: int = 1, ys = None):
         if comp_setup == 'spiral':
@@ -98,7 +95,7 @@ class Component:
         self.bond_pairlist = []
         self.hb = interactions.init_bonded_interactions()
 
-#add_bonds (offset)：批量添加共价键到 OpenMM
+#add_bonds (offset)：批量添加共价键到 openMM
     def add_bonds(self, offset):  #参数offset：多分子共存时，当前分子珠子全局 ID 偏移（区分不同 Component）。
         exclusion_map = [] # for ah, yu etc.
         for i in range(0,self.nbeads-1):
@@ -170,6 +167,7 @@ class Protein(Component):
         pae_sigm = np.exp(pae_sigm_factor) / (np.exp(pae_sigm_factor) + 1)
         # pae_inv = build.load_pae_inv(input_pae,colabfold=self.colabfold)
         # scaled_LJYU_pairlist = []
+
 #scale：总约束强度（0~1）；
 #bondscale：混合系数，用于插值原生 PDB 距离与标准键长；
 #scale 高→使用 PDB 真实距离；scale 低→使用标准平衡键长。
@@ -208,7 +206,6 @@ class Protein(Component):
             print(f'Adding charges for {self.charge_termini} termini of {self.name}.', flush=True)
         self.qs = patch_terminal_qs(self.qs,self.n_termini,self.c_termini,loc=self.charge_termini)
         self.mws = patch_terminal_mws(self.mws,self.n_termini,self.c_termini,loc=self.charge_termini)
-#执行父类参数计算；修正 N/C 末端电荷、分子量（多肽末端有额外氨基 / 羧基电荷）。
         
         if self.restraint:
             # self.init_restraint_force() # Done via sim.py
